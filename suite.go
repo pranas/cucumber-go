@@ -28,6 +28,18 @@ type stepDefinition struct {
 	Handler stepHandlerFunc
 }
 
+type Summary struct {
+	Success  bool
+	ExitCode int
+	Duration time.Duration
+
+	TestCasesTotal  int
+	TestCasesPassed int
+	StepsTotal      int
+	StepsPassed     int
+	StepsSkipped    int
+}
+
 type suite struct {
 	language      string
 	baseDirectory string
@@ -99,9 +111,9 @@ func (s *suite) DefineStep(pattern string, fn stepHandlerFunc) {
 	})
 }
 
-func (s *suite) Run() int {
-	done := make(chan bool)
-	go s.listen(done)
+func (s *suite) Run() Summary {
+	resultCh := make(chan Summary)
+	go s.listen(resultCh)
 
 	var stepDefinitionConfig []*messages.StepDefinitionConfig
 
@@ -143,23 +155,29 @@ func (s *suite) Run() int {
 		},
 	})
 
-	result := <-done
+	started := time.Now()
+	result := <-resultCh
+	result.Duration = time.Since(started)
 
-	if result {
-		return 0
-	} else {
-		return 1
+	if !result.Success {
+		result.ExitCode = 1
 	}
+
+	s.formatter.DisplaySummary(result)
+
+	return result
 }
 
-func (s *suite) listen(resultCh chan bool) {
+func (s *suite) listen(resultCh chan Summary) {
+	summary := Summary{}
+
 	for command := range s.outgoing {
 		s.formatter.ProcessMessage(command)
 
 		switch x := command.Message.(type) {
 		case *messages.Envelope_TestRunFinished:
-			resultCh <- x.TestRunFinished.Success
-			return
+			summary.Success = x.TestRunFinished.Success
+			break
 		case *messages.Envelope_CommandRunBeforeTestRunHooks:
 			s.respond(&messages.Envelope{
 				Message: &messages.Envelope_CommandActionComplete{
@@ -198,14 +216,26 @@ func (s *suite) listen(resultCh chan bool) {
 				},
 			})
 		case *messages.Envelope_CommandInitializeTestCase:
+			summary.TestCasesTotal += 1
 			go s.initializeTestCase(x.CommandInitializeTestCase)
 		case *messages.Envelope_TestCaseFinished:
 			s.testCases.Delete(x.TestCaseFinished.PickleId)
+			if x.TestCaseFinished.TestResult.Status == messages.TestResult_PASSED {
+				summary.TestCasesPassed += 1
+			}
+		case *messages.Envelope_TestStepFinished:
+			summary.StepsTotal += 1
+			switch x.TestStepFinished.TestResult.Status {
+			case messages.TestResult_PASSED:
+				summary.StepsPassed += 1
+			case messages.TestResult_SKIPPED:
+				summary.StepsSkipped += 1
+			}
 		case *messages.Envelope_CommandRunTestStep:
 			go s.runTestStep(x.CommandRunTestStep)
 		}
 	}
-	resultCh <- false
+	resultCh <- summary
 }
 
 func (s *suite) respond(m *messages.Envelope) {

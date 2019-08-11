@@ -27,6 +27,11 @@ func TestRun(t *testing.T) {
 
 		return nil
 	})
-	exitCode := s.Run()
-	assert.Equal(t, 0, exitCode)
+	summary := s.Run()
+	assert.True(t, summary.Success)
+	assert.Equal(t, 0, summary.ExitCode)
+	assert.Equal(t, 2, summary.TestCasesTotal)
+	assert.Equal(t, 2, summary.TestCasesPassed)
+	assert.Equal(t, 4, summary.StepsTotal)
+	assert.Equal(t, 4, summary.StepsPassed)
 }
