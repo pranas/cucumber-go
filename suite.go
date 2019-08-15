@@ -1,6 +1,7 @@
 package cucumber
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -21,6 +22,10 @@ const (
 	OrderDefinition
 )
 
+var (
+	ErrPending = errors.New("implementation pending")
+)
+
 type stepHandlerFunc func(TestCase, ...string) error
 
 type testCaseInitializerFunc func(TestCase) error
@@ -28,18 +33,6 @@ type testCaseInitializerFunc func(TestCase) error
 type stepDefinition struct {
 	Pattern string
 	Handler stepHandlerFunc
-}
-
-type Summary struct {
-	Success  bool
-	ExitCode int
-	Duration time.Duration
-
-	TestCasesTotal  int
-	TestCasesPassed int
-	StepsTotal      int
-	StepsPassed     int
-	StepsSkipped    int
 }
 
 type suite struct {
@@ -63,7 +56,7 @@ func NewSuite(config Config, args ...string) (*suite, error) {
 	}
 
 	if config.Formatter == nil {
-		config.Formatter = &nopFormatter{}
+		config.Formatter = NewDotFormatter(os.Stdout)
 	}
 
 	if len(config.Paths) == 0 {
@@ -253,14 +246,29 @@ func (s *suite) listen(resultCh chan Summary) {
 			go s.initializeTestCase(x.CommandInitializeTestCase)
 		case *messages.Envelope_TestCaseFinished:
 			s.testCases.Delete(x.TestCaseFinished.PickleId)
-			if x.TestCaseFinished.TestResult.Status == messages.TestResult_PASSED {
+
+			switch x.TestCaseFinished.TestResult.Status {
+			case messages.TestResult_PASSED:
 				summary.TestCasesPassed += 1
+			case messages.TestResult_FAILED:
+				summary.TestCasesFailed += 1
+			case messages.TestResult_PENDING:
+				summary.TestCasesPending += 1
+			case messages.TestResult_UNDEFINED:
+				summary.TestCasesUndefined += 1
 			}
 		case *messages.Envelope_TestStepFinished:
 			summary.StepsTotal += 1
+
 			switch x.TestStepFinished.TestResult.Status {
 			case messages.TestResult_PASSED:
 				summary.StepsPassed += 1
+			case messages.TestResult_FAILED:
+				summary.StepsFailed += 1
+			case messages.TestResult_PENDING:
+				summary.StepsPending += 1
+			case messages.TestResult_UNDEFINED:
+				summary.StepsUndefined += 1
 			case messages.TestResult_SKIPPED:
 				summary.StepsSkipped += 1
 			}
@@ -306,7 +314,9 @@ func (s *suite) runTestStep(command *messages.CommandRunTestStep) {
 	}
 
 	err := s.callStepHandler(command)
-	if err != nil {
+	if err == ErrPending {
+		testResult.Status = messages.TestResult_PENDING
+	} else if err != nil {
 		testResult.Status = messages.TestResult_FAILED
 	}
 
