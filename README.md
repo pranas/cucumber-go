@@ -10,7 +10,7 @@ You would typically create `cmd/cucumber/cucumber.go` similar to this:
 
 ```golang
 func main() {
-    s, err := cucumber.NewSuite()
+    s, err := cucumber.NewSuite(cucumber.Config{}, os.Args[1:]...)
     if err != nil {
         panic(err)
     }
@@ -34,11 +34,9 @@ func main() {
 
 ## TODO
 
-* Customize configuration
 * Support pending steps
 * Formatters (pretty, dots)
-* Filtering (single file, single scenario, with tags)
-* CLI argument parsing
+* Filtering (single scenario)
 * Support Cucumber expressions (currently regex)
 * godoc
 

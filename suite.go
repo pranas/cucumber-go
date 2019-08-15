@@ -2,6 +2,8 @@ package cucumber
 
 import (
 	"flag"
+	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,11 +14,11 @@ import (
 	messages "github.com/cucumber/cucumber-messages-go/v3"
 )
 
-type orderType = messages.SourcesOrderType
+type OrderType uint8
 
 const (
-	OrderRandom     orderType = messages.SourcesOrderType_RANDOM
-	OrderDefinition           = messages.SourcesOrderType_ORDER_OF_DEFINITION
+	OrderRandom OrderType = 0
+	OrderDefinition
 )
 
 type stepHandlerFunc func(TestCase, ...string) error
@@ -41,13 +43,9 @@ type Summary struct {
 }
 
 type suite struct {
-	language      string
-	baseDirectory string
-	files         []string
-	seed          uint64
-	order         orderType
-
-	formatter           Formatter
+	config              Config
+	baseDirectory       string
+	files               []string
 	stepDefinitions     []stepDefinition
 	testCases           sync.Map
 	testCaseInitializer testCaseInitializerFunc
@@ -55,11 +53,40 @@ type suite struct {
 	outgoing            chan *messages.Envelope
 }
 
-func NewSuite(args ...string) (*suite, error) {
-	fs := flag.NewFlagSet("cucumber", flag.ContinueOnError)
+func NewSuite(config Config, args ...string) (*suite, error) {
+	if config.Language == "" {
+		config.Language = "en"
+	}
+
+	if config.Seed == 0 {
+		config.Seed = uint64(time.Now().Unix())
+	}
+
+	if config.Formatter == nil {
+		config.Formatter = &nopFormatter{}
+	}
+
+	if len(config.Paths) == 0 {
+		config.Paths = []string{"features/"}
+	}
+
+	fs := flag.NewFlagSet("", flag.ContinueOnError)
+	fs.SetOutput(ioutil.Discard)
+	fs.Usage = func() {}
+	fs.StringVar(&config.Language, "lang", config.Language, "")
+	fs.Uint64Var(&config.Seed, "seed", config.Seed, "")
+	fs.Uint64Var(&config.Concurrency, "concurrency", config.Concurrency, "")
+	fs.Uint64Var(&config.Concurrency, "c", config.Concurrency, "")
+	fs.BoolVar(&config.FailFast, "fast", config.FailFast, "")
+	fs.BoolVar(&config.DryRun, "dry", config.DryRun, "")
+	fs.BoolVar(&config.Strict, "strict", config.Strict, "")
 	err := fs.Parse(args)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(fs.Args()) > 0 {
+		config.Paths = fs.Args()
 	}
 
 	e := runner.NewRunner()
@@ -70,9 +97,14 @@ func NewSuite(args ...string) (*suite, error) {
 		return nil, err
 	}
 
-	files, err := filepath.Glob("features/*")
-	if err != nil {
-		return nil, err
+	var files []string
+
+	for _, path := range config.Paths {
+		filesForPath, err := findFeatures(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find features in path: %s", path)
+		}
+		files = append(files, filesForPath...)
 	}
 
 	for i := range files {
@@ -83,19 +115,13 @@ func NewSuite(args ...string) (*suite, error) {
 	}
 
 	suite := &suite{
+		config:              config,
+		baseDirectory:       baseDirectory,
+		files:               files,
 		testCaseInitializer: func(TestCase) error { return nil },
 		incoming:            incoming,
 		outgoing:            outgoing,
-
-		formatter:     &nopFormatter{},
-		language:      "en",
-		baseDirectory: baseDirectory,
-		files:         files,
-		seed:          uint64(time.Now().Unix()),
-		order:         OrderRandom,
 	}
-
-	//suite.formatter = &debugFormatter{}
 
 	return suite, nil
 }
@@ -131,24 +157,31 @@ func (s *suite) Run() Summary {
 		StepDefinitionConfigs: stepDefinitionConfig,
 	}
 
+	order := messages.SourcesOrderType_RANDOM
+	if s.config.Order == OrderDefinition {
+		order = messages.SourcesOrderType_ORDER_OF_DEFINITION
+	}
+
 	s.respond(&messages.Envelope{
 		Message: &messages.Envelope_CommandStart{
 			CommandStart: &messages.CommandStart{
 				BaseDirectory: s.baseDirectory,
 				RuntimeConfig: &messages.RuntimeConfig{
-					IsFailFast:  false,
-					IsDryRun:    false,
-					IsStrict:    false,
-					MaxParallel: 0, // unbound
+					IsFailFast:  s.config.FailFast,
+					IsDryRun:    s.config.DryRun,
+					IsStrict:    s.config.Strict,
+					MaxParallel: s.config.Concurrency,
 				},
 				SupportCodeConfig: &supportCodeConfig,
 				SourcesConfig: &messages.SourcesConfig{
-					Language:      s.language,
+					Language:      s.config.Language,
 					AbsolutePaths: s.files,
-					Filters:       &messages.SourcesFilterConfig{},
+					Filters: &messages.SourcesFilterConfig{
+						TagExpression: s.config.TagExpression,
+					},
 					Order: &messages.SourcesOrder{
-						Type: messages.SourcesOrderType_RANDOM,
-						Seed: s.seed,
+						Type: order,
+						Seed: s.config.Seed,
 					},
 				},
 			},
@@ -163,7 +196,7 @@ func (s *suite) Run() Summary {
 		result.ExitCode = 1
 	}
 
-	s.formatter.DisplaySummary(result)
+	s.config.Formatter.DisplaySummary(result)
 
 	return result
 }
@@ -172,7 +205,7 @@ func (s *suite) listen(resultCh chan Summary) {
 	summary := Summary{}
 
 	for command := range s.outgoing {
-		s.formatter.ProcessMessage(command)
+		s.config.Formatter.ProcessMessage(command)
 
 		switch x := command.Message.(type) {
 		case *messages.Envelope_TestRunFinished:
