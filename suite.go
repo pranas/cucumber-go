@@ -309,15 +309,20 @@ func (s *suite) initializeTestCase(command *messages.CommandInitializeTestCase) 
 }
 
 func (s *suite) runTestStep(command *messages.CommandRunTestStep) {
+	now := time.Now()
+	err := s.callStepHandler(command)
+	duration := time.Since(now)
+
 	testResult := messages.TestResult{
-		Status: messages.TestResult_PASSED,
+		Status:              messages.TestResult_PASSED,
+		DurationNanoseconds: uint64(duration.Nanoseconds()),
 	}
 
-	err := s.callStepHandler(command)
 	if err == ErrPending {
 		testResult.Status = messages.TestResult_PENDING
 	} else if err != nil {
 		testResult.Status = messages.TestResult_FAILED
+		testResult.Message = err.Error()
 	}
 
 	s.respond(&messages.Envelope{

@@ -5,7 +5,6 @@ package cucumber
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	messages "github.com/cucumber/cucumber-messages-go/v3"
 	"github.com/fatih/color"
@@ -21,12 +20,14 @@ const (
 )
 
 type dotFormatter struct {
-	out io.Writer
+	out     io.Writer
+	summary *summaryFormatter
 }
 
 func NewDotFormatter(stdout io.Writer) *dotFormatter {
 	return &dotFormatter{
-		out: stdout,
+		out:     stdout,
+		summary: NewSummaryFormatter(stdout),
 	}
 }
 
@@ -55,40 +56,10 @@ func (df *dotFormatter) ProcessMessage(msg *messages.Envelope) {
 			color.New(undefinedColor).Fprint(df.out, "U")
 		}
 	}
+
+	df.summary.ProcessMessage(msg)
 }
 
-func (df *dotFormatter) DisplaySummary(s Summary) {
-	fmt.Fprint(df.out, "\n")
-	scenarioStatusSummary := statusSummary(s.TestCasesPassed, s.TestCasesFailed, s.TestCasesPending, s.TestCasesUndefined, 0)
-	fmt.Fprintf(df.out, "%d scenarios (%s)\n", s.TestCasesTotal, scenarioStatusSummary)
-
-	stepStatusSummary := statusSummary(s.StepsPassed, s.StepsFailed, s.StepsPending, s.StepsUndefined, s.StepsSkipped)
-	fmt.Fprintf(df.out, "%d steps (%s)\n", s.StepsTotal, stepStatusSummary)
-	fmt.Fprintln(df.out, s.Duration)
-}
-
-func statusSummary(passed, failed, pending, undefined, skipped int) string {
-	var acc []string
-
-	if passed > 0 {
-		acc = append(acc, color.New(successColor).Sprintf("%d passed", passed))
-	}
-
-	if failed > 0 {
-		acc = append(acc, color.New(failureColor).Sprintf("%d failed", failed))
-	}
-
-	if pending > 0 {
-		acc = append(acc, color.New(pendingColor).Sprintf("%d pending", pending))
-	}
-
-	if undefined > 0 {
-		acc = append(acc, color.New(undefinedColor).Sprintf("%d undefined", undefined))
-	}
-
-	if skipped > 0 {
-		acc = append(acc, color.New(skippedColor).Sprintf("%d skipped", skipped))
-	}
-
-	return strings.Join(acc, ", ")
+func (df *dotFormatter) DisplaySummary(summary Summary) {
+	df.summary.DisplaySummary(summary)
 }
