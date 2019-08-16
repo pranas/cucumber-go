@@ -130,10 +130,7 @@ func (s *suite) DefineStep(pattern string, fn stepHandlerFunc) {
 	})
 }
 
-func (s *suite) Run() Summary {
-	resultCh := make(chan Summary)
-	go s.listen(resultCh)
-
+func (s *suite) Run() int {
 	var stepDefinitionConfig []*messages.StepDefinitionConfig
 
 	for i, sd := range s.stepDefinitions {
@@ -181,29 +178,22 @@ func (s *suite) Run() Summary {
 		},
 	})
 
-	started := time.Now()
-	result := <-resultCh
-	result.Duration = time.Since(started)
+	success := s.listen()
 
-	if !result.Success {
-		result.ExitCode = 1
+	if success {
+		return 0
+	} else {
+		return 1
 	}
-
-	s.config.Formatter.DisplaySummary(result)
-
-	return result
 }
 
-func (s *suite) listen(resultCh chan Summary) {
-	summary := Summary{}
-
+func (s *suite) listen() bool {
 	for command := range s.outgoing {
 		s.config.Formatter.ProcessMessage(command)
 
 		switch x := command.Message.(type) {
 		case *messages.Envelope_TestRunFinished:
-			summary.Success = x.TestRunFinished.Success
-			break
+			return x.TestRunFinished.Success
 		case *messages.Envelope_CommandRunBeforeTestRunHooks:
 			s.respond(&messages.Envelope{
 				Message: &messages.Envelope_CommandActionComplete{
@@ -242,41 +232,15 @@ func (s *suite) listen(resultCh chan Summary) {
 				},
 			})
 		case *messages.Envelope_CommandInitializeTestCase:
-			summary.TestCasesTotal += 1
 			go s.initializeTestCase(x.CommandInitializeTestCase)
 		case *messages.Envelope_TestCaseFinished:
 			s.testCases.Delete(x.TestCaseFinished.PickleId)
-
-			switch x.TestCaseFinished.TestResult.Status {
-			case messages.TestResult_PASSED:
-				summary.TestCasesPassed += 1
-			case messages.TestResult_FAILED:
-				summary.TestCasesFailed += 1
-			case messages.TestResult_PENDING:
-				summary.TestCasesPending += 1
-			case messages.TestResult_UNDEFINED:
-				summary.TestCasesUndefined += 1
-			}
-		case *messages.Envelope_TestStepFinished:
-			summary.StepsTotal += 1
-
-			switch x.TestStepFinished.TestResult.Status {
-			case messages.TestResult_PASSED:
-				summary.StepsPassed += 1
-			case messages.TestResult_FAILED:
-				summary.StepsFailed += 1
-			case messages.TestResult_PENDING:
-				summary.StepsPending += 1
-			case messages.TestResult_UNDEFINED:
-				summary.StepsUndefined += 1
-			case messages.TestResult_SKIPPED:
-				summary.StepsSkipped += 1
-			}
 		case *messages.Envelope_CommandRunTestStep:
 			go s.runTestStep(x.CommandRunTestStep)
 		}
 	}
-	resultCh <- summary
+
+	return false
 }
 
 func (s *suite) respond(m *messages.Envelope) {
@@ -309,15 +273,20 @@ func (s *suite) initializeTestCase(command *messages.CommandInitializeTestCase) 
 }
 
 func (s *suite) runTestStep(command *messages.CommandRunTestStep) {
+	now := time.Now()
+	err := s.callStepHandler(command)
+	duration := time.Since(now)
+
 	testResult := messages.TestResult{
-		Status: messages.TestResult_PASSED,
+		Status:              messages.TestResult_PASSED,
+		DurationNanoseconds: uint64(duration.Nanoseconds()),
 	}
 
-	err := s.callStepHandler(command)
 	if err == ErrPending {
 		testResult.Status = messages.TestResult_PENDING
 	} else if err != nil {
 		testResult.Status = messages.TestResult_FAILED
+		testResult.Message = err.Error()
 	}
 
 	s.respond(&messages.Envelope{

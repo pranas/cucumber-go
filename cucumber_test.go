@@ -2,6 +2,7 @@ package cucumber_test
 
 import (
 	"fmt"
+	"io/ioutil"
 	"testing"
 
 	"github.com/pranas/cucumber-go"
@@ -11,26 +12,28 @@ import (
 )
 
 func TestRun(t *testing.T) {
-	s, err := cucumber.NewSuite(cucumber.Config{})
+	summary := cucumber.NewSummaryFormatter(ioutil.Discard)
+	s, err := cucumber.NewSuite(cucumber.Config{Formatter:summary})
 	require.NoError(t, err)
 
-	summary := s.Run()
+	exitCode := s.Run()
+	assert.Equal(t, 1, exitCode)
 	assert.False(t, summary.Success)
-	assert.Equal(t, 1, summary.ExitCode)
 	assert.Equal(t, 2, summary.TestCasesTotal)
 	assert.Equal(t, 0, summary.TestCasesPassed)
 	assert.Equal(t, 4, summary.StepsTotal)
 	assert.Equal(t, 0, summary.StepsPassed)
 
-	s, err = cucumber.NewSuite(cucumber.Config{})
+	summary = cucumber.NewSummaryFormatter(ioutil.Discard)
+	s, err = cucumber.NewSuite(cucumber.Config{Formatter:summary})
 	require.NoError(t, err)
 
 	s.DefineStep(`^you concat "([^"]*)" and "([^"]*)"$`, concat)
 	s.DefineStep(`^you should have "([^"]*)"$`, matchOutput)
 
-	summary = s.Run()
+	exitCode = s.Run()
+	assert.Equal(t, 0, exitCode)
 	assert.True(t, summary.Success)
-	assert.Equal(t, 0, summary.ExitCode)
 	assert.Equal(t, 2, summary.TestCasesTotal)
 	assert.Equal(t, 2, summary.TestCasesPassed)
 	assert.Equal(t, 4, summary.StepsTotal)

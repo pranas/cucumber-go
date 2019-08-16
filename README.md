@@ -27,8 +27,8 @@ func main() {
         return nil
     })
 
-    summary := s.Run()
-    os.Exit(summary.ExitCode)
+    exitCode := s.Run()
+    os.Exit(exitCode)
 }
 ```
 
