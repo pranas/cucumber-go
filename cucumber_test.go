@@ -50,6 +50,23 @@ func TestRun(t *testing.T) {
 	assert.Equal(t, 0, summary.TestCasesPassed)
 	assert.Equal(t, 2, summary.StepsTotal)
 	assert.Equal(t, 0, summary.StepsPassed)
+
+	summary = cucumber.NewSummaryFormatter(ioutil.Discard)
+	s, err = cucumber.NewSuite(cucumber.Config{Formatter:summary})
+	require.NoError(t, err)
+
+	s.DefineStep(`^you concat "([^"]*)" and "([^"]*)"$`, concat)
+	s.DefineStep(`^you should have "([^"]*)"$`, func(_ cucumber.TestCase, s ...string) error {
+		panic("should recover from this")
+	})
+
+	exitCode = s.Run()
+	assert.Equal(t, 1, exitCode)
+	assert.False(t, summary.Success)
+	assert.Equal(t, 2, summary.TestCasesTotal)
+	assert.Equal(t, 0, summary.TestCasesPassed)
+	assert.Equal(t, 4, summary.StepsTotal)
+	assert.Equal(t, 2, summary.StepsPassed)
 }
 
 func concat(tc cucumber.TestCase, matches ...string) error {

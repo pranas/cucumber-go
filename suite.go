@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -317,11 +318,13 @@ func (s *suite) runTestStep(command *messages.CommandRunTestStep) {
 	})
 }
 
-func (s *suite) callStepHandler(command *messages.CommandRunTestStep) error {
+func (s *suite) callStepHandler(command *messages.CommandRunTestStep) (err error) {
 	i, err := strconv.Atoi(command.StepDefinitionId)
 	if err != nil {
 		return err
 	}
+
+	stepDefinition := s.stepDefinitions[i]
 
 	var captures []string
 
@@ -331,5 +334,12 @@ func (s *suite) callStepHandler(command *messages.CommandRunTestStep) error {
 	}
 
 	testCase, _ := s.testCases.Load(command.PickleId)
-	return s.stepDefinitions[i].Handler(testCase.(TestCase), captures...)
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("step handler panicked: %+v\n%s", r, string(debug.Stack()))
+		}
+	}()
+
+	return stepDefinition.Handler(testCase.(TestCase), captures...)
 }
