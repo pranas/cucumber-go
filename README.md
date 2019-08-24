@@ -27,6 +27,10 @@ func main() {
         return nil
     })
 
+    s.DefineStep(`^you should have "([^"]*)"$`, func(tc cucumber.TestCase, matches ...string) error {
+        return cucumber.ErrPending
+    })
+
     exitCode := s.Run()
     os.Exit(exitCode)
 }
@@ -34,7 +38,6 @@ func main() {
 
 ## TODO
 
-* Support pending steps
 * Formatters (pretty, dots)
 * Support Cucumber expressions (currently regex)
 * godoc
