@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,8 @@ const (
 
 var (
 	ErrPending = errors.New("implementation pending")
+
+	lineFilterMatcher = regexp.MustCompile(`:\d+$`)
 )
 
 type stepHandlerFunc func(TestCase, ...string) error
@@ -39,6 +42,7 @@ type suite struct {
 	config              Config
 	baseDirectory       string
 	files               []string
+	lineFilters         map[string][]uint64
 	stepDefinitions     []stepDefinition
 	testCases           sync.Map
 	testCaseInitializer testCaseInitializerFunc
@@ -91,8 +95,17 @@ func NewSuite(config Config, args ...string) (*suite, error) {
 	}
 
 	var files []string
+	lineFilters := map[string][]uint64{}
 
 	for _, path := range config.Paths {
+		line := lineFilterMatcher.FindString(path)
+		if line != "" {
+			path = strings.TrimSuffix(path, line)
+			lineNumber, _ := strconv.ParseUint(line[1:], 10, 0)
+
+			lineFilters[path] = append(lineFilters[path], lineNumber)
+		}
+
 		filesForPath, err := findFeatures(path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find features in path: %s", path)
@@ -100,17 +113,11 @@ func NewSuite(config Config, args ...string) (*suite, error) {
 		files = append(files, filesForPath...)
 	}
 
-	for i := range files {
-		files[i], err = filepath.Abs(files[i])
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	suite := &suite{
 		config:              config,
 		baseDirectory:       baseDirectory,
 		files:               files,
+		lineFilters:         lineFilters,
 		testCaseInitializer: func(TestCase) error { return nil },
 		incoming:            incoming,
 		outgoing:            outgoing,
@@ -152,6 +159,14 @@ func (s *suite) Run() int {
 		order = messages.SourcesOrderType_ORDER_OF_DEFINITION
 	}
 
+	var lineFilters []*messages.UriToLinesMapping
+	for filePath, lines := range s.lineFilters {
+		lineFilters = append(lineFilters, &messages.UriToLinesMapping{
+			AbsolutePath: filePath,
+			Lines:        lines,
+		})
+	}
+
 	s.respond(&messages.Envelope{
 		Message: &messages.Envelope_CommandStart{
 			CommandStart: &messages.CommandStart{
@@ -167,7 +182,8 @@ func (s *suite) Run() int {
 					Language:      s.config.Language,
 					AbsolutePaths: s.files,
 					Filters: &messages.SourcesFilterConfig{
-						TagExpression: s.config.TagExpression,
+						TagExpression:     s.config.TagExpression,
+						UriToLinesMapping: lineFilters,
 					},
 					Order: &messages.SourcesOrder{
 						Type: order,

@@ -38,6 +38,18 @@ func TestRun(t *testing.T) {
 	assert.Equal(t, 2, summary.TestCasesPassed)
 	assert.Equal(t, 4, summary.StepsTotal)
 	assert.Equal(t, 4, summary.StepsPassed)
+
+	summary = cucumber.NewSummaryFormatter(ioutil.Discard)
+	s, err = cucumber.NewSuite(cucumber.Config{Formatter:summary}, "features/concat.feature:6")
+	require.NoError(t, err)
+
+	exitCode = s.Run()
+	assert.Equal(t, 1, exitCode)
+	assert.False(t, summary.Success)
+	assert.Equal(t, 1, summary.TestCasesTotal)
+	assert.Equal(t, 0, summary.TestCasesPassed)
+	assert.Equal(t, 2, summary.StepsTotal)
+	assert.Equal(t, 0, summary.StepsPassed)
 }
 
 func concat(tc cucumber.TestCase, matches ...string) error {

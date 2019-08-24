@@ -36,7 +36,6 @@ func main() {
 
 * Support pending steps
 * Formatters (pretty, dots)
-* Filtering (single scenario)
 * Support Cucumber expressions (currently regex)
 * godoc
 
